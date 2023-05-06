@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  TagName:
+    Type: String
+    Description: Enter the Tag Name of the instance
+  AWSRegion:
+    Type: String
+    Description: Enter Application Region
+    Default: ap-south-1
+    AllowedValues:
+      - us-east-1
+      - us-east-2
+      - us-west-1
+      - us-west-2
+      - ca-central-1
+      - ap-south-1
+      - ap-northeast-2
+      - ap-southeast-1
+      - ap-southeast-2
+      - ap-northeast-1
+      - eu-central-1
+      - eu-west-1
+      - eu-west-2
+      - sa-east-1
+    ConstraintDescription: must be a valid Region
+  TimeToStartEc2:
+    Type: String
+    Description: 'Time to Start Ec2 Instance e.g: cron(0 15 * * ? *) '
+  TimeToStopEc2:
+    Type: String
+    Description: 'Time to Stop Ec2 Insatnce e.g: cron(0 3 * * ? *) '
+Resources:
+  StartEc2Rule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: StartEc2Rule
+      ScheduleExpression: !Ref TimeToStartEc2
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt 
+            - StartEC2Instance
+            - Arn
+          Id: TargetFunctionV1
+  PermissionForEventsToInvokeLambdastartec2:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !Ref StartEC2Instance
+      Action: 'lambda:InvokeFunction'
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt 
+        - StartEc2Rule
+        - Arn
+  StopEc2Rule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: StopEc2Rule
+      ScheduleExpression: !Ref TimeToStopEc2
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt 
+            - StopEC2Instance
+            - Arn
+          Id: TargetFunctionV1
+  PermissionForEventsToInvokeLambdastopec2:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !Ref StopEC2Instance
+      Action: 'lambda:InvokeFunction'
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt 
+        - StopEc2Rule
+        - Arn
+  ec2SchedulerRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: ec2SchedulerPermissions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:log-group:/aws/lambda/*'
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:GetItem'
+                Resource:
+                  - 'arn:aws:dynamodb:*:*:table/*'
+              - Effect: Allow
+                Action:
+                  - 'ec2:StartInstances'
+                  - 'ec2:StopInstances'
+                  - 'ec2:DescribeRegions'
+                  - 'ec2:DescribeInstances'
+                  - 'kms:CreateGrant'
+                  - 'cloudwatch:PutMetricData'
+                  - 'cloudformation:DescribeStacks'
+                Resource: '*'
+  StartEC2Instance:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Role: !GetAtt 
+        - ec2SchedulerRole
+        - Arn
+      Code:
+        ZipFile: !Join 
+          - ''
+          - - |
+              import boto3
+            - region ='
+            - !Ref AWSRegion
+            - |
+              '
+            - |
+              def handler(event, context):
+            - |2
+                  client = boto3.client('ec2', region_name=region)
+            - |2
+                  response = client.describe_instances()
+            - |2
+                  for r in response['Reservations']:
+            - |2
+                      for i in r['Instances']:
+            - |2
+                       for tag in i['Tags']:
+            - '               if tag[''Value''] == '''
+            - !Ref TagName
+            - |
+              ': 
+            - |2
+                                 if i['State']['Name'] == 'stopped':
+            - |2
+                                          instances = [i['InstanceId']]
+            - |2
+                                          client.start_instances(InstanceIds=instances)
+      Timeout: 300
+      Handler: index.handler
+      Runtime: python3.8
+      MemorySize: 128
+  StopEC2Instance:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Role: !GetAtt 
+        - ec2SchedulerRole
+        - Arn
+      Code:
+        ZipFile: !Join 
+          - ''
+          - - |
+              import boto3
+            - region ='
+            - !Ref AWSRegion
+            - |
+              '
+            - |
+              def handler(event, context):
+            - |2
+                  client = boto3.client('ec2', region_name=region)
+            - |2
+                  response = client.describe_instances()
+            - |2
+                  for r in response['Reservations']:
+            - |2
+                      for i in r['Instances']:
+            - |2
+                       for tag in i['Tags']:
+            - '               if tag[''Value''] == '''
+            - !Ref TagName
+            - |
+              ': 
+            - |2
+                                 if i['State']['Name'] == 'running':
+            - |2
+                                          instances = [i['InstanceId']]
+            - |2
+                                          client.stop_instances(InstanceIds=instances)
+      Timeout: 300
+      Handler: index.handler
+      Runtime: python3.8
+      MemorySize: 128

@@ -1,0 +1,24 @@
+import boto3
+import time
+rds = boto3.client('rds')
+
+def lambda_handler(event, context):
+
+    print ("Check RDS's tags")
+    current_time = time.strftime("%H:%M")
+
+    # Search all the instances which contains scheduled filter
+    instances = rds.describe_db_instances()
+    print(instances)
+
+    startInstances = []
+
+    for instance in instances["DBInstances"]:
+
+        tags = rds.list_tags_for_resource(ResourceName=instance["DBInstanceArn"])
+
+        for tag in tags["TagList"]:
+
+            if tag['Key'] == 'Restart' and tag['Value'] == 'WORKDAY':
+                startInstances.append(instance["DBInstanceIdentifier"])
+                rds.start_db_instance(DBInstanceIdentifier=instance["DBInstanceIdentifier"])
